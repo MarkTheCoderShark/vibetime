@@ -7,14 +7,14 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A1000001 /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001; };
-		A1000002 /* AppTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002; };
-		A1000003 /* Storage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000003; };
-		A1000004 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000004; };
-		A1000005 /* MenuBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000005; };
-		A1000006 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000006; };
-		A1000007 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A2000007; };
-		A1000008 /* ShareCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000011; };
+		A1000001 /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001 /* App.swift */; };
+		A1000002 /* AppTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002 /* AppTracker.swift */; };
+		A1000003 /* Storage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000003 /* Storage.swift */; };
+		A1000004 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000004 /* AppSettings.swift */; };
+		A1000005 /* MenuBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000005 /* MenuBarView.swift */; };
+		A1000006 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000006 /* SettingsView.swift */; };
+		A1000007 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A2000007 /* Assets.xcassets */; };
+		A1000008 /* ShareCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000011 /* ShareCardView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -42,7 +42,7 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		A4000001 /* root */ = {
+		A4000001 = {
 			isa = PBXGroup;
 			children = (
 				A4000002 /* vibetime */,
@@ -118,7 +118,7 @@
 				en,
 				Base,
 			);
-			mainGroup = A4000001 /* root */;
+			mainGroup = A4000001;
 			productRefGroup = A4000003 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -216,7 +216,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 57K43762P3;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = vibetime/Info.plist;
@@ -243,7 +243,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 57K43762P3;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = vibetime/Info.plist;
@@ -284,7 +284,6 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
-
 	};
 	rootObject = A6000001 /* Project object */;
 }
