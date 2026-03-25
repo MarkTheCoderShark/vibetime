@@ -6,6 +6,7 @@ struct MenuBarView: View {
     @State private var refreshTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     @State private var tick: Bool = false
     @State private var showSettings = false
+    @State private var showCopiedFeedback = false
 
     var body: some View {
         if showSettings {
@@ -279,6 +280,18 @@ struct MenuBarView: View {
 
                 Spacer()
 
+                Label(showCopiedFeedback ? "Saved!" : "Share", systemImage: showCopiedFeedback ? "checkmark" : "square.and.arrow.up")
+                    .font(.system(size: 12))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .foregroundColor(showCopiedFeedback ? .green : .secondary)
+                    .glassEffect(.regular, in: .capsule)
+                    .onTapGesture {
+                        shareCard()
+                    }
+
+                Spacer()
+
                 Label("Quit", systemImage: "power")
                     .font(.system(size: 12))
                     .padding(.horizontal, 10)
@@ -293,6 +306,36 @@ struct MenuBarView: View {
     }
 
     // MARK: - Helpers
+
+    private func shareCard() {
+        let week = tracker.weekHistory()
+        let weekTotals = week.map { record in
+            record.sessions.values.reduce(0.0) { $0 + $1.activeTime }
+        }
+
+        let allSessions = Array(tracker.sessions.values)
+        let success = saveAndCopyShareCard(
+            sessions: allSessions,
+            totalActive: tracker.totalActiveTime,
+            totalRunning: tracker.totalRunningTime,
+            sessionDuration: tracker.sessionDuration,
+            bestStreak: tracker.bestFocusStreak,
+            contextSwitches: tracker.totalContextSwitches,
+            weekTotals: weekTotals,
+            previousWeekTotal: 0
+        )
+
+        if success {
+            withAnimation {
+                showCopiedFeedback = true
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                withAnimation {
+                    showCopiedFeedback = false
+                }
+            }
+        }
+    }
 
     private func sortedSessions() -> [AppSession] {
         let activeSessions = tracker.sessions.values.filter { $0.isRunning || $0.activeTime > 0 || $0.runningTime > 0 }

@@ -6,6 +6,12 @@ A lightweight macOS menubar app that tracks your developer tool usage. See how l
 ![Swift 6](https://img.shields.io/badge/Swift-6-orange)
 ![License: MIT](https://img.shields.io/badge/License-MIT-green)
 
+<p align="center">
+  <img src="screenshots/main.png" width="320" alt="vibetime main dropdown">
+  &nbsp;&nbsp;
+  <img src="screenshots/settings.png" width="320" alt="vibetime settings">
+</p>
+
 ## What It Tracks
 
 - **Active Time** — the app is frontmost, you're looking at it
@@ -23,6 +29,14 @@ vibetime listens for macOS workspace notifications — no polling, no timers eat
 - Idle detection via `CGEventSource` (pauses tracking when you walk away)
 - Data stored locally in `~/Library/Application Support/vibetime/`
 - No network calls, no telemetry, no accounts
+
+## Share Your Vibe
+
+Hit the Share button to export a PnL-style card — saves to Desktop and copies to clipboard. Drop it into LinkedIn, Twitter, Discord.
+
+<p align="center">
+  <img src="screenshots/share-card.png" width="400" alt="vibetime share card">
+</p>
 
 ## Features
 
