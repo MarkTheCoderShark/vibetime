@@ -55,6 +55,8 @@ class AppTracker: ObservableObject {
     private var tickTimer: Timer?
     private let idleThreshold: TimeInterval = 300 // 5 minutes
     private var isIdle = false
+    private var sleepTime: Date?
+    private let sessionGapThreshold: TimeInterval = 1800 // 30 minutes
     private let storage = Storage()
 
     private var observers: [NSObjectProtocol] = []
@@ -136,7 +138,16 @@ class AppTracker: ObservableObject {
             self.handleAppTerminated(bundleID: bundleID)
         }
 
-        observers = [activateObs, deactivateObs, launchObs, terminateObs]
+        // Sleep/wake — flush time on sleep, re-anchor on wake
+        let sleepObs = nc.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.handleSleep()
+        }
+
+        let wakeObs = nc.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.handleWake()
+        }
+
+        observers = [activateObs, deactivateObs, launchObs, terminateObs, sleepObs, wakeObs]
 
         // Tick timer — updates running time for all running apps once per minute
         tickTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
@@ -277,6 +288,67 @@ class AppTracker: ObservableObject {
         }
 
         onStateChange?(isAnyTrackedAppActive)
+        save()
+    }
+
+    // MARK: - Sleep/Wake
+
+    private func handleSleep() {
+        let now = Date()
+        sleepTime = now
+
+        for (bundleID, var session) in sessions {
+            // Flush running time up to the moment of sleep
+            if session.isRunning, let lastLaunched = session.lastLaunched {
+                session.runningTime += now.timeIntervalSince(lastLaunched)
+                session.lastLaunched = nil
+            }
+
+            // Flush active time up to the moment of sleep
+            if session.isActive, let lastActivated = session.lastActivated, !isIdle {
+                let elapsed = now.timeIntervalSince(lastActivated)
+                session.activeTime += elapsed
+                session.currentFocusStreak += elapsed
+                if session.currentFocusStreak > session.longestFocusStreak {
+                    session.longestFocusStreak = session.currentFocusStreak
+                }
+                session.lastActivated = nil
+            }
+
+            sessions[bundleID] = session
+        }
+
+        save()
+    }
+
+    private func handleWake() {
+        let now = Date()
+
+        // If the gap since sleep exceeds the threshold, start a new session
+        if let sleepTime = sleepTime {
+            let gap = now.timeIntervalSince(sleepTime)
+            if gap > sessionGapThreshold {
+                sessionStartTime = now
+                // Reset focus streaks — new work block
+                for (bundleID, var session) in sessions {
+                    session.currentFocusStreak = 0
+                    sessions[bundleID] = session
+                }
+            }
+        }
+        sleepTime = nil
+
+        // Re-anchor timestamps so the next tick doesn't count the sleep period
+        for (bundleID, var session) in sessions {
+            if session.isRunning {
+                session.lastLaunched = now
+            }
+            if session.isActive {
+                session.lastActivated = now
+            }
+            sessions[bundleID] = session
+        }
+
         save()
     }
 
