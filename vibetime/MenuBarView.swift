@@ -233,13 +233,48 @@ struct MenuBarView: View {
 
     private var weekSparkline: some View {
         let week = tracker.weekHistory()
-        let totals = week.map { record in
-            record.sessions.values.reduce(0.0) { $0 + $1.activeTime }
-        }
-        let maxTotal = totals.max() ?? 1
-        let days = ["M", "T", "W", "T", "F", "S", "S"]
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+        let dayFormatter = DateFormatter()
+        dayFormatter.dateFormat = "EEEEE" // single-letter day name
 
-        return VStack(spacing: 4) {
+        // Use live data for today, saved data for previous days
+        let totals: [Double] = week.enumerated().map { (i, record) in
+            if i == week.count - 1 { return tracker.totalActiveTime }
+            return record.sessions.values.reduce(0.0) { $0 + $1.activeTime }
+        }
+
+        let dayLabels: [String] = week.map { record in
+            if let date = dateFormatter.date(from: record.date) {
+                return dayFormatter.string(from: date)
+            }
+            return "?"
+        }
+
+        let weekTotal = totals.reduce(0, +)
+        let daysWithData = totals.filter { $0 > 0 }.count
+        let avgPerDay = daysWithData > 0 ? weekTotal / Double(daysWithData) : 0
+
+        let weekBestFocus: TimeInterval = week.enumerated().map { (i, record) in
+            if i == week.count - 1 { return tracker.bestFocusStreak }
+            return record.sessions.values.map(\.longestFocusStreak).max() ?? 0
+        }.max() ?? 0
+
+        let maxTotal = totals.max() ?? 1
+
+        return VStack(spacing: 6) {
+            // Week header with total
+            HStack {
+                Text("This Week")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.secondary)
+                Spacer()
+                Text(formatTime(weekTotal))
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .id(tick)
+            }
+
+            // Sparkline bars
             HStack(spacing: 4) {
                 ForEach(0..<7, id: \.self) { i in
                     VStack(spacing: 2) {
@@ -252,11 +287,30 @@ struct MenuBarView: View {
                             .frame(width: 28, height: max(4, CGFloat(totals[i] / maxTotal) * 32))
                             .frame(height: 32, alignment: .bottom)
 
-                        Text(days[i])
+                        Text(dayLabels[i])
                             .font(.system(size: 9))
                             .foregroundColor(.secondary)
                     }
                 }
+            }
+
+            // Weekly summary
+            HStack(spacing: 4) {
+                Text("Avg")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                Text(formatTime(avgPerDay))
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+
+                Text("·")
+                    .foregroundColor(.secondary)
+
+                Text("Best focus")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                Text(formatTime(weekBestFocus))
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .id(tick)
             }
         }
     }

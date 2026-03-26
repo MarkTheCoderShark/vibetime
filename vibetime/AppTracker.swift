@@ -59,16 +59,30 @@ class AppTracker: ObservableObject {
     private let sessionGapThreshold: TimeInterval = 1800 // 30 minutes
     private let storage = Storage()
 
+    private var currentDateKey: String = Storage.todayKey()
     private var observers: [NSObjectProtocol] = []
 
     func loadTrackedBundleIDs(_ ids: [String]) {
         trackedBundleIDs = Set(ids)
+        currentDateKey = Storage.todayKey()
 
         // Load today's saved data
         if let record = storage.loadToday() {
             sessions = record.sessions
             totalContextSwitches = record.totalContextSwitches
             sessionStartTime = record.sessionStartTime
+
+            // Guard against stale data that leaked across a day boundary
+            let midnight = Calendar.current.startOfDay(for: Date())
+            let maxPossible = Date().timeIntervalSince(midnight)
+            let hasStaleData = sessions.values.contains {
+                $0.runningTime > maxPossible || $0.activeTime > maxPossible
+            }
+            if hasStaleData {
+                sessions = [:]
+                totalContextSwitches = 0
+                sessionStartTime = nil
+            }
         }
 
         // Check what's already running
@@ -324,6 +338,8 @@ class AppTracker: ObservableObject {
     private func handleWake() {
         let now = Date()
 
+        checkDayBoundary()
+
         // If the gap since sleep exceeds the threshold, start a new session
         if let sleepTime = sleepTime {
             let gap = now.timeIntervalSince(sleepTime)
@@ -352,9 +368,67 @@ class AppTracker: ObservableObject {
         save()
     }
 
+    // MARK: - Day Boundary
+
+    private func checkDayBoundary() {
+        let todayKey = Storage.todayKey()
+        guard todayKey != currentDateKey else { return }
+
+        let now = Date()
+
+        // Flush current active/running time into the old day's totals
+        for (bundleID, var session) in sessions {
+            if session.isRunning, let lastLaunched = session.lastLaunched {
+                session.runningTime += now.timeIntervalSince(lastLaunched)
+                session.lastLaunched = now
+            }
+            if session.isActive, let lastActivated = session.lastActivated, !isIdle {
+                let elapsed = now.timeIntervalSince(lastActivated)
+                session.activeTime += elapsed
+                session.currentFocusStreak += elapsed
+                if session.currentFocusStreak > session.longestFocusStreak {
+                    session.longestFocusStreak = session.currentFocusStreak
+                }
+                session.lastActivated = now
+            }
+            sessions[bundleID] = session
+        }
+
+        // Save final snapshot to the old day's file
+        let oldRecord = DayRecord(
+            date: currentDateKey,
+            sessions: sessions,
+            totalContextSwitches: totalContextSwitches,
+            sessionStartTime: sessionStartTime
+        )
+        storage.saveDay(oldRecord)
+
+        // Reset for the new day
+        currentDateKey = todayKey
+        totalContextSwitches = 0
+        let anyRunning = sessions.values.contains { $0.isRunning }
+        sessionStartTime = anyRunning ? now : nil
+
+        // Keep running/active apps but zero out accumulated time
+        var fresh: [String: AppSession] = [:]
+        for (bundleID, session) in sessions where session.isRunning || session.isActive {
+            var s = AppSession(bundleID: bundleID, appName: session.appName)
+            s.isRunning = session.isRunning
+            s.isActive = session.isActive
+            if session.isRunning { s.lastLaunched = now }
+            if session.isActive { s.lastActivated = now }
+            fresh[bundleID] = s
+        }
+        sessions = fresh
+
+        save()
+    }
+
     // MARK: - Tick (updates running time for live apps)
 
     private func tick() {
+        checkDayBoundary()
+
         let now = Date()
         for (bundleID, var session) in sessions {
             if session.isRunning, let lastLaunched = session.lastLaunched {
