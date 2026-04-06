@@ -10,6 +10,7 @@ struct ShareCardView: View {
     let contextSwitches: Int
     let weekTotals: [TimeInterval]
     let previousWeekTotal: TimeInterval
+    var dateLabel: String? = nil
 
     private let cardWidth: CGFloat = 440
     private let cardHeight: CGFloat = 520
@@ -249,6 +250,7 @@ struct ShareCardView: View {
     // MARK: - Helpers
 
     private func dateString() -> String {
+        if let label = dateLabel { return label }
         let formatter = DateFormatter()
         formatter.dateFormat = "MMM d, yyyy"
         return formatter.string(from: Date())
@@ -281,7 +283,8 @@ func renderShareCard(
     bestStreak: TimeInterval,
     contextSwitches: Int,
     weekTotals: [TimeInterval],
-    previousWeekTotal: TimeInterval
+    previousWeekTotal: TimeInterval,
+    dateLabel: String? = nil
 ) -> NSImage? {
     let view = ShareCardView(
         sessions: sessions,
@@ -291,7 +294,8 @@ func renderShareCard(
         bestStreak: bestStreak,
         contextSwitches: contextSwitches,
         weekTotals: weekTotals,
-        previousWeekTotal: previousWeekTotal
+        previousWeekTotal: previousWeekTotal,
+        dateLabel: dateLabel
     )
 
     let renderer = ImageRenderer(content: view)
@@ -310,7 +314,9 @@ func saveAndCopyShareCard(
     bestStreak: TimeInterval,
     contextSwitches: Int,
     weekTotals: [TimeInterval],
-    previousWeekTotal: TimeInterval
+    previousWeekTotal: TimeInterval,
+    dateLabel: String? = nil,
+    filenameSuffix: String? = nil
 ) -> Bool {
     guard let image = renderShareCard(
         sessions: sessions,
@@ -320,7 +326,8 @@ func saveAndCopyShareCard(
         bestStreak: bestStreak,
         contextSwitches: contextSwitches,
         weekTotals: weekTotals,
-        previousWeekTotal: previousWeekTotal
+        previousWeekTotal: previousWeekTotal,
+        dateLabel: dateLabel
     ) else { return false }
 
     // Copy to clipboard
@@ -329,9 +336,323 @@ func saveAndCopyShareCard(
     pasteboard.writeObjects([image])
 
     // Save to Desktop
-    let formatter = DateFormatter()
-    formatter.dateFormat = "MMMd"
-    let filename = "vibetime-\(formatter.string(from: Date())).png"
+    let suffix = filenameSuffix ?? {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMMd"
+        return formatter.string(from: Date())
+    }()
+    let filename = "vibetime-\(suffix).png"
+    let desktopURL = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first!
+    let fileURL = desktopURL.appendingPathComponent(filename)
+
+    guard let tiffData = image.tiffRepresentation,
+          let bitmap = NSBitmapImageRep(data: tiffData),
+          let pngData = bitmap.representation(using: .png, properties: [:]) else { return false }
+
+    try? pngData.write(to: fileURL, options: .atomic)
+
+    return true
+}
+
+// MARK: - Week Share Card
+
+struct WeekShareCardView: View {
+    let daySessions: [[AppSession]]
+    let dayTotals: [TimeInterval]
+    let totalActive: TimeInterval
+    let totalRunning: TimeInterval
+    let bestStreak: TimeInterval
+    let totalSwitches: Int
+    let weekLabel: String
+    var dayDates: [String] = []      // yyyy-MM-dd per day, for chart labels
+
+    private let cardWidth: CGFloat = 440
+    private let cardHeight: CGFloat = 560
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Text("vibetime")
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.5))
+                Spacer()
+                Text(weekLabel)
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.4))
+            }
+            .padding(.horizontal, 28)
+            .padding(.top, 28)
+
+            // Big number
+            VStack(spacing: 6) {
+                Text(formatTimeLarge(totalActive))
+                    .font(.system(size: 52, weight: .bold, design: .monospaced))
+                    .foregroundColor(.white)
+
+                Text("ACTIVE THIS WEEK")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.4))
+                    .tracking(1.5)
+            }
+            .padding(.top, 20)
+
+            // Divider
+            Rectangle()
+                .fill(Color.white.opacity(0.08))
+                .frame(height: 1)
+                .padding(.horizontal, 28)
+                .padding(.top, 20)
+
+            // Combined per-app breakdown
+            VStack(spacing: 0) {
+                HStack {
+                    Text("APP")
+                        .frame(width: 100, alignment: .leading)
+                    Spacer()
+                    Text("ACTIVE")
+                        .frame(width: 70, alignment: .trailing)
+                    Text("RUNNING")
+                        .frame(width: 70, alignment: .trailing)
+                }
+                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .foregroundColor(.white.opacity(0.3))
+                .tracking(1)
+                .padding(.bottom, 8)
+
+                let merged = mergedSessions()
+                ForEach(Array(merged.prefix(5).enumerated()), id: \.offset) { index, entry in
+                    weekPositionRow(entry: entry, index: index, maxActive: merged.first?.active ?? 1)
+                }
+            }
+            .padding(.horizontal, 28)
+            .padding(.top, 16)
+
+            // Divider
+            Rectangle()
+                .fill(Color.white.opacity(0.08))
+                .frame(height: 1)
+                .padding(.horizontal, 28)
+                .padding(.top, 12)
+
+            // Stats row
+            HStack(spacing: 0) {
+                let daysWithData = dayTotals.filter { $0 > 0 }.count
+                let avg = daysWithData > 0 ? totalActive / Double(daysWithData) : 0
+                statCell(label: "DAILY AVG", value: formatTimeCompact(avg))
+                statCell(label: "FOCUS BEST", value: formatTimeCompact(bestStreak))
+                statCell(label: "SWITCHES", value: "\(totalSwitches)")
+                statCell(label: "RUNNING", value: formatTimeCompact(totalRunning))
+            }
+            .padding(.horizontal, 28)
+            .padding(.top, 14)
+
+            // Daily chart
+            weeklyChart
+                .padding(.horizontal, 28)
+                .padding(.top, 16)
+
+            Spacer()
+
+            // Footer
+            HStack {
+                Text("vibetime")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.white.opacity(0.2))
+                Spacer()
+                Text("github.com/MarkTheCoderShark/vibetime")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.white.opacity(0.2))
+            }
+            .padding(.horizontal, 28)
+            .padding(.bottom, 20)
+        }
+        .frame(width: cardWidth, height: cardHeight)
+        .background(
+            RoundedRectangle(cornerRadius: 20)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.08, green: 0.08, blue: 0.12),
+                            Color(red: 0.05, green: 0.05, blue: 0.08)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20)
+                        .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                )
+        )
+    }
+
+    private struct MergedEntry {
+        let appName: String
+        let active: TimeInterval
+        let running: TimeInterval
+    }
+
+    private func mergedSessions() -> [MergedEntry] {
+        var byName: [String: (active: TimeInterval, running: TimeInterval)] = [:]
+        for daySess in daySessions {
+            for session in daySess {
+                let existing = byName[session.appName, default: (0, 0)]
+                byName[session.appName] = (existing.active + session.activeTime, existing.running + session.runningTime)
+            }
+        }
+        return byName.map { MergedEntry(appName: $0.key, active: $0.value.active, running: $0.value.running) }
+            .sorted { $0.active > $1.active }
+    }
+
+    private func weekPositionRow(entry: MergedEntry, index: Int, maxActive: TimeInterval) -> some View {
+        let fraction = maxActive > 0 ? entry.active / maxActive : 0
+        let colors: [Color] = [
+            Color(red: 0.3, green: 0.6, blue: 1.0),
+            Color(red: 0.6, green: 0.4, blue: 1.0),
+            Color(red: 1.0, green: 0.55, blue: 0.2),
+            Color(red: 0.3, green: 0.85, blue: 0.45),
+            Color(red: 1.0, green: 0.4, blue: 0.5)
+        ]
+        let color = colors[index % colors.count]
+
+        return HStack(spacing: 10) {
+            Circle()
+                .fill(color)
+                .frame(width: 6, height: 6)
+
+            Text(entry.appName)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(.white.opacity(0.9))
+                .frame(width: 90, alignment: .leading)
+                .lineLimit(1)
+
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Color.white.opacity(0.04))
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(color.opacity(0.6))
+                        .frame(width: max(2, geo.size.width * fraction))
+                }
+            }
+            .frame(height: 4)
+
+            Text(formatTimeCompact(entry.active))
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .foregroundColor(.white.opacity(0.8))
+                .frame(width: 70, alignment: .trailing)
+
+            Text(formatTimeCompact(entry.running))
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundColor(.white.opacity(0.4))
+                .frame(width: 70, alignment: .trailing)
+        }
+        .padding(.vertical, 6)
+    }
+
+    private func statCell(label: String, value: String) -> some View {
+        VStack(spacing: 4) {
+            Text(value)
+                .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                .foregroundColor(.white.opacity(0.8))
+            Text(label)
+                .font(.system(size: 8, weight: .semibold))
+                .foregroundColor(.white.opacity(0.3))
+                .tracking(1)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var weeklyChart: some View {
+        let maxTotal = dayTotals.max() ?? 1
+        let dayFormatter = DateFormatter()
+        dayFormatter.dateFormat = "EEEEE"
+        let keyFormatter = DateFormatter()
+        keyFormatter.dateFormat = "yyyy-MM-dd"
+
+        return VStack(spacing: 4) {
+            HStack(alignment: .bottom, spacing: 6) {
+                ForEach(0..<min(dayTotals.count, 14), id: \.self) { i in
+                    let dateStr = dayDates.indices.contains(i) ? dayDates[i] : ""
+                    let date = keyFormatter.date(from: dateStr) ?? Date()
+                    VStack(spacing: 3) {
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(
+                                i == dayTotals.count - 1
+                                    ? LinearGradient(colors: [Color(red: 0.3, green: 0.6, blue: 1.0), Color(red: 0.5, green: 0.4, blue: 1.0)], startPoint: .bottom, endPoint: .top)
+                                    : LinearGradient(colors: [Color.white.opacity(0.12), Color.white.opacity(0.08)], startPoint: .bottom, endPoint: .top)
+                            )
+                            .frame(height: max(3, CGFloat(dayTotals[i] / maxTotal) * 36))
+                            .frame(height: 36, alignment: .bottom)
+
+                        Text(dayFormatter.string(from: date))
+                            .font(.system(size: 8, weight: .medium))
+                            .foregroundColor(.white.opacity(0.25))
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+        }
+    }
+
+    private func formatTimeLarge(_ interval: TimeInterval) -> String {
+        let hours = Int(interval) / 3600
+        let minutes = (Int(interval) % 3600) / 60
+        return String(format: "%d:%02d", hours, minutes)
+    }
+
+    private func formatTimeCompact(_ interval: TimeInterval) -> String {
+        let hours = Int(interval) / 3600
+        let minutes = (Int(interval) % 3600) / 60
+        if hours > 0 {
+            return String(format: "%dh %02dm", hours, minutes)
+        }
+        return String(format: "%dm", minutes)
+    }
+}
+
+// MARK: - Week Render to Image
+
+@MainActor
+func saveAndCopyWeekShareCard(
+    daySessions: [[AppSession]],
+    dayTotals: [TimeInterval],
+    totalActive: TimeInterval,
+    totalRunning: TimeInterval,
+    bestStreak: TimeInterval,
+    totalSwitches: Int,
+    weekLabel: String,
+    dayDates: [String] = [],
+    filenameSuffix: String? = nil
+) -> Bool {
+    let view = WeekShareCardView(
+        daySessions: daySessions,
+        dayTotals: dayTotals,
+        totalActive: totalActive,
+        totalRunning: totalRunning,
+        bestStreak: bestStreak,
+        totalSwitches: totalSwitches,
+        weekLabel: weekLabel,
+        dayDates: dayDates
+    )
+
+    let renderer = ImageRenderer(content: view)
+    renderer.scale = 2.0
+
+    guard let cgImage = renderer.cgImage else { return false }
+    let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width / 2, height: cgImage.height / 2))
+
+    let pasteboard = NSPasteboard.general
+    pasteboard.clearContents()
+    pasteboard.writeObjects([image])
+
+    let suffix = filenameSuffix ?? {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMMd"
+        return "week-\(formatter.string(from: Date()))"
+    }()
+    let filename = "vibetime-\(suffix).png"
     let desktopURL = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first!
     let fileURL = desktopURL.appendingPathComponent(filename)
 

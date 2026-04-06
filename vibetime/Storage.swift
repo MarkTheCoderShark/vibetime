@@ -63,6 +63,29 @@ class Storage {
         return records
     }
 
+    func loadDays(from startKey: String, to endKey: String) -> [DayRecord] {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        let calendar = Calendar.current
+
+        guard let startDate = formatter.date(from: startKey),
+              let endDate = formatter.date(from: endKey) else { return [] }
+
+        var records: [DayRecord] = []
+        var current = startDate
+        while current <= endDate {
+            let key = formatter.string(from: current)
+            if let record = loadDay(for: key) {
+                records.append(record)
+            } else {
+                records.append(DayRecord(date: key, sessions: [:], totalContextSwitches: 0, sessionStartTime: nil))
+            }
+            guard let next = calendar.date(byAdding: .day, value: 1, to: current) else { break }
+            current = next
+        }
+        return records
+    }
+
     func pruneOldData(keepDays: Int = 30) {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"

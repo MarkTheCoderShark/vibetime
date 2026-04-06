@@ -6,6 +6,7 @@ struct MenuBarView: View {
     @State private var refreshTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     @State private var tick: Bool = false
     @State private var showSettings = false
+    @State private var showSharePicker = false
     @State private var showCopiedFeedback = false
 
     var body: some View {
@@ -13,6 +14,13 @@ struct MenuBarView: View {
             PopoverSettingsView(showSettings: $showSettings)
                 .environmentObject(settings)
                 .frame(width: 320)
+        } else if showSharePicker {
+            ShareRangePickerView(
+                showSharePicker: $showSharePicker,
+                showCopiedFeedback: $showCopiedFeedback,
+                tracker: tracker
+            )
+            .frame(width: 320)
         } else {
             mainView
         }
@@ -334,15 +342,29 @@ struct MenuBarView: View {
 
                 Spacer()
 
-                Label(showCopiedFeedback ? "Saved!" : "Share", systemImage: showCopiedFeedback ? "checkmark" : "square.and.arrow.up")
-                    .font(.system(size: 12))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .foregroundColor(showCopiedFeedback ? .green : .secondary)
-                    .glassEffect(.regular, in: .capsule)
-                    .onTapGesture {
-                        shareCard()
+                Menu {
+                    Button("Today") { shareCard() }
+
+                    Button("This Week") { shareRollingWeek() }
+
+                    Button("Last Week") { shareLastWeek() }
+
+                    Divider()
+
+                    Button("Custom Range...") {
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            showSharePicker = true
+                        }
                     }
+                } label: {
+                    Label(showCopiedFeedback ? "Saved!" : "Share", systemImage: showCopiedFeedback ? "checkmark" : "square.and.arrow.up")
+                        .font(.system(size: 12))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .foregroundColor(showCopiedFeedback ? .green : .secondary)
+                }
+                .menuStyle(.borderlessButton)
+                .glassEffect(.regular, in: .capsule)
 
                 Spacer()
 
@@ -359,7 +381,14 @@ struct MenuBarView: View {
         }
     }
 
-    // MARK: - Helpers
+    // MARK: - Share Helpers
+
+    private func showCopiedFeedbackBriefly() {
+        withAnimation { showCopiedFeedback = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            withAnimation { showCopiedFeedback = false }
+        }
+    }
 
     private func shareCard() {
         let week = tracker.weekHistory()
@@ -379,16 +408,94 @@ struct MenuBarView: View {
             previousWeekTotal: 0
         )
 
-        if success {
-            withAnimation {
-                showCopiedFeedback = true
+        if success { showCopiedFeedbackBriefly() }
+    }
+
+    private func shareRollingWeek() {
+        let calendar = Calendar.current
+        let end = Date()
+        let start = calendar.date(byAdding: .day, value: -6, to: end)!
+        shareRange(from: start, to: end)
+    }
+
+    private func shareLastWeek() {
+        let calendar = Calendar.current
+        // Find the most recent Monday (start of this week), then go back 7 days for last week
+        let today = Date()
+        let weekday = calendar.component(.weekday, from: today) // 1=Sun, 2=Mon
+        let daysSinceMonday = (weekday + 5) % 7 // 0=Mon, 1=Tue, ...
+        let thisMonday = calendar.date(byAdding: .day, value: -daysSinceMonday, to: today)!
+        let lastMonday = calendar.date(byAdding: .day, value: -7, to: thisMonday)!
+        let lastSunday = calendar.date(byAdding: .day, value: -1, to: thisMonday)!
+        shareRange(from: lastMonday, to: lastSunday)
+    }
+
+    private func shareRange(from startDate: Date, to endDate: Date) {
+        let keyFormatter = DateFormatter()
+        keyFormatter.dateFormat = "yyyy-MM-dd"
+        let startKey = keyFormatter.string(from: startDate)
+        let endKey = keyFormatter.string(from: endDate)
+        let todayKey = Storage.todayKey()
+
+        let storage = Storage()
+        let records = storage.loadDays(from: startKey, to: endKey)
+
+        let daySessions: [[AppSession]] = records.map { record in
+            if record.date == todayKey {
+                return Array(tracker.sessions.values)
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                withAnimation {
-                    showCopiedFeedback = false
-                }
-            }
+            return Array(record.sessions.values)
         }
+
+        let dayTotals: [TimeInterval] = records.map { record in
+            if record.date == todayKey { return tracker.totalActiveTime }
+            return record.sessions.values.reduce(0.0) { $0 + $1.activeTime }
+        }
+
+        let totalActive = dayTotals.reduce(0, +)
+
+        let totalRunning: TimeInterval = records.reduce(0.0) { acc, record in
+            if record.date == todayKey { return acc + tracker.totalRunningTime }
+            return acc + record.sessions.values.reduce(0.0) { $0 + $1.runningTime }
+        }
+
+        let bestStreak: TimeInterval = records.map { record in
+            if record.date == todayKey { return tracker.bestFocusStreak }
+            return record.sessions.values.map(\.longestFocusStreak).max() ?? 0
+        }.max() ?? 0
+
+        let totalSwitches: Int = records.reduce(0) { acc, record in
+            if record.date == todayKey { return acc + tracker.totalContextSwitches }
+            return acc + record.totalContextSwitches
+        }
+
+        let labelFormatter = DateFormatter()
+        labelFormatter.dateFormat = "MMM d"
+        let yearFormatter = DateFormatter()
+        yearFormatter.dateFormat = "MMM d, yyyy"
+        let weekLabel = "\(labelFormatter.string(from: startDate)) – \(yearFormatter.string(from: endDate))"
+
+        let fileSuffix: String = {
+            let f = DateFormatter()
+            f.dateFormat = "MMMd"
+            return "\(f.string(from: startDate))-\(f.string(from: endDate))"
+        }()
+
+        let dayDates = records.map(\.date)
+
+        let success = saveAndCopyWeekShareCard(
+            daySessions: daySessions,
+            dayTotals: dayTotals,
+            totalActive: totalActive,
+            totalRunning: totalRunning,
+            bestStreak: bestStreak,
+            totalSwitches: totalSwitches,
+            weekLabel: weekLabel,
+            dayDates: dayDates,
+            filenameSuffix: fileSuffix
+        )
+
+        if success { showCopiedFeedbackBriefly() }
     }
 
     private func sortedSessions() -> [AppSession] {
@@ -453,5 +560,229 @@ struct StatBadge: View {
         }
         .padding(.vertical, 6)
         .frame(maxWidth: .infinity)
+    }
+}
+
+// MARK: - Share Range Picker
+
+struct ShareRangePickerView: View {
+    @Binding var showSharePicker: Bool
+    @Binding var showCopiedFeedback: Bool
+    @ObservedObject var tracker: AppTracker
+
+    @State private var startDate: Date = Calendar.current.date(byAdding: .day, value: -6, to: Date()) ?? Date()
+    @State private var endDate: Date = Date()
+
+    private var earliestDate: Date {
+        Calendar.current.date(byAdding: .day, value: -29, to: Date()) ?? Date()
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        showSharePicker = false
+                    }
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 12, weight: .medium))
+                    Text("Back")
+                        .font(.system(size: 12))
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(.accentColor)
+
+                Spacer()
+
+                Text("Export Range")
+                    .font(.system(size: 13, weight: .semibold))
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 10)
+
+            Divider()
+                .opacity(0.3)
+                .padding(.horizontal, 12)
+
+            VStack(spacing: 14) {
+                // Date pickers
+                VStack(alignment: .leading, spacing: 8) {
+                    DatePicker(
+                        "From",
+                        selection: $startDate,
+                        in: earliestDate...endDate,
+                        displayedComponents: .date
+                    )
+                    .font(.system(size: 12))
+
+                    DatePicker(
+                        "To",
+                        selection: $endDate,
+                        in: startDate...Date(),
+                        displayedComponents: .date
+                    )
+                    .font(.system(size: 12))
+                }
+
+                // Preview stats
+                let preview = previewStats()
+                HStack(spacing: 12) {
+                    VStack(spacing: 2) {
+                        Text(formatTime(preview.totalActive))
+                            .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                        Text("Active")
+                            .font(.system(size: 9))
+                            .foregroundColor(.secondary)
+                    }
+                    VStack(spacing: 2) {
+                        Text("\(preview.days) day\(preview.days == 1 ? "" : "s")")
+                            .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                        Text("Range")
+                            .font(.system(size: 9))
+                            .foregroundColor(.secondary)
+                    }
+                    VStack(spacing: 2) {
+                        Text("\(preview.appsUsed)")
+                            .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                        Text("Apps")
+                            .font(.system(size: 9))
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+
+                // Share button
+                Button {
+                    exportRange()
+                } label: {
+                    Label(showCopiedFeedback ? "Saved!" : "Export & Copy", systemImage: showCopiedFeedback ? "checkmark" : "square.and.arrow.up")
+                        .font(.system(size: 13, weight: .medium))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+        }
+    }
+
+    private struct PreviewStats {
+        let totalActive: TimeInterval
+        let days: Int
+        let appsUsed: Int
+    }
+
+    private func previewStats() -> PreviewStats {
+        let keyFormatter = DateFormatter()
+        keyFormatter.dateFormat = "yyyy-MM-dd"
+        let todayKey = Storage.todayKey()
+
+        let storage = Storage()
+        let records = storage.loadDays(
+            from: keyFormatter.string(from: startDate),
+            to: keyFormatter.string(from: endDate)
+        )
+
+        var totalActive: TimeInterval = 0
+        var appNames: Set<String> = []
+
+        for record in records {
+            if record.date == todayKey {
+                totalActive += tracker.totalActiveTime
+                for session in tracker.sessions.values where session.activeTime > 0 || session.isActive {
+                    appNames.insert(session.appName)
+                }
+            } else {
+                for session in record.sessions.values {
+                    totalActive += session.activeTime
+                    if session.activeTime > 0 { appNames.insert(session.appName) }
+                }
+            }
+        }
+
+        return PreviewStats(totalActive: totalActive, days: records.count, appsUsed: appNames.count)
+    }
+
+    private func exportRange() {
+        let keyFormatter = DateFormatter()
+        keyFormatter.dateFormat = "yyyy-MM-dd"
+        let startKey = keyFormatter.string(from: startDate)
+        let endKey = keyFormatter.string(from: endDate)
+        let todayKey = Storage.todayKey()
+
+        let storage = Storage()
+        let records = storage.loadDays(from: startKey, to: endKey)
+
+        let daySessions: [[AppSession]] = records.map { record in
+            if record.date == todayKey { return Array(tracker.sessions.values) }
+            return Array(record.sessions.values)
+        }
+
+        let dayTotals: [TimeInterval] = records.map { record in
+            if record.date == todayKey { return tracker.totalActiveTime }
+            return record.sessions.values.reduce(0.0) { $0 + $1.activeTime }
+        }
+
+        let totalActive = dayTotals.reduce(0, +)
+
+        let totalRunning: TimeInterval = records.reduce(0.0) { acc, record in
+            if record.date == todayKey { return acc + tracker.totalRunningTime }
+            return acc + record.sessions.values.reduce(0.0) { $0 + $1.runningTime }
+        }
+
+        let bestStreak: TimeInterval = records.map { record in
+            if record.date == todayKey { return tracker.bestFocusStreak }
+            return record.sessions.values.map(\.longestFocusStreak).max() ?? 0
+        }.max() ?? 0
+
+        let totalSwitches: Int = records.reduce(0) { acc, record in
+            if record.date == todayKey { return acc + tracker.totalContextSwitches }
+            return acc + record.totalContextSwitches
+        }
+
+        let labelFormatter = DateFormatter()
+        labelFormatter.dateFormat = "MMM d"
+        let yearFormatter = DateFormatter()
+        yearFormatter.dateFormat = "MMM d, yyyy"
+        let weekLabel = "\(labelFormatter.string(from: startDate)) – \(yearFormatter.string(from: endDate))"
+
+        let fileSuffix: String = {
+            let f = DateFormatter()
+            f.dateFormat = "MMMd"
+            return "\(f.string(from: startDate))-\(f.string(from: endDate))"
+        }()
+
+        let dayDates = records.map(\.date)
+
+        let success = saveAndCopyWeekShareCard(
+            daySessions: daySessions,
+            dayTotals: dayTotals,
+            totalActive: totalActive,
+            totalRunning: totalRunning,
+            bestStreak: bestStreak,
+            totalSwitches: totalSwitches,
+            weekLabel: weekLabel,
+            dayDates: dayDates,
+            filenameSuffix: fileSuffix
+        )
+
+        if success {
+            withAnimation { showCopiedFeedback = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                withAnimation { showCopiedFeedback = false }
+            }
+        }
+    }
+
+    private func formatTime(_ interval: TimeInterval) -> String {
+        let totalSeconds = Int(interval)
+        let hours = totalSeconds / 3600
+        let minutes = (totalSeconds % 3600) / 60
+        if hours > 0 { return String(format: "%dh %02dm", hours, minutes) }
+        return String(format: "%dm", minutes)
     }
 }
