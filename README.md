@@ -34,6 +34,13 @@ vibetime listens for macOS workspace notifications — no polling, no timers eat
 
 Hit the Share button to export a PnL-style card — saves to Desktop and copies to clipboard. Drop it into LinkedIn, Twitter, Discord.
 
+- **Today** — current day's live stats
+- **This Week** — rolling 7-day summary
+- **Last Week** — previous Mon–Sun calendar week
+- **Custom Range** — pick any start/end date (up to 30 days back)
+
+Range cards combine per-app breakdowns across all selected days with a daily bar chart, averages, and totals.
+
 <p align="center">
   <img src="screenshots/share-card.png" width="400" alt="vibetime share card">
 </p>
